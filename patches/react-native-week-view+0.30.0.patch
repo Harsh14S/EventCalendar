@@ -51,7 +51,7 @@ index 5784d33..24edeb8 100644
    };
  
 diff --git a/node_modules/react-native-week-view/src/Header/Header.js b/node_modules/react-native-week-view/src/Header/Header.js
-index f3e86bd..43a4874 100644
+index f3e86bd..d72d9e1 100644
 --- a/node_modules/react-native-week-view/src/Header/Header.js
 +++ b/node_modules/react-native-week-view/src/Header/Header.js
 @@ -1,6 +1,6 @@
@@ -71,54 +71,76 @@ index f3e86bd..43a4874 100644
  
  const identity = (item) => item;
  
-@@ -30,10 +31,36 @@ const HeaderPage = ({
+@@ -30,10 +31,56 @@ const HeaderPage = ({
    EventComponent,
    onEventPress,
    onEventLongPress,
 +  //custom changes
++  isCustom,
 +  customHeaderData,
 +  customDate
  }) => {
    const days = calculateDaysArray(initialDate, numberOfDays, rightToLeft) || [];
-+  const headerData = customHeaderData?.length ? customHeaderData : days;
++  const headerData = isCustom && customHeaderData?.length ? customHeaderData?.map((item) => {
++    return {location: item, timeStamp: customDate, dateS: moment(customDate).format('YYYY-MM-DD')}
++  }) : days;
 +  useEffect(() => {
-+    console.log('------> ',moment(customDate).format('DD MMM YYYY'))
-+  }, [customDate])
++    // let arr = customHeaderData.map((item) => {
++
++    //   return {location: item, date: customDate}
++    // })
++    // console.log(days)
++    // console.log('------> ',moment(customDate).format('DD MMM YYYY'))
++  }, [days])
    return (
      <View style={styles.container}>
-+      {/* {
++      {
 +        customHeaderData?.length ?
 +        <View style={styles.daysContainer}>
-+        {headerData.map((country, index) => (
-+         <View key={index} style={[{
-+          width: dayWidth,
-+          flex: 1,
-+          alignItems: 'center',
-+          justifyContent: 'center',
-+          borderLeftWidth: 1,
-+          borderBottomWidth: 1,
-+          borderColor: 'black',
-+          }, style]}>
-+          <Text style={[{fontSize: 12,color: 'black',}, textStyle]}>
-+            {country}
-+          </Text>
-+         </View>
++        {headerData.map((item, index) => (
++          <HeaderDay
++            style={style}
++            textStyle={textStyle}
++            key={index} //changed
++            day={item.dateS} //changed
++            location={item.location}
++            format={formatDate}
++            DayComponent={DayComponent}
++            TodayComponent={TodayComponent}
++            onDayPress={onDayPress}
++            width={dayWidth}
++          />
++        //  <View key={index} style={[{
++        //   width: dayWidth,
++        //   flex: 1,
++        //   alignItems: 'center',
++        //   justifyContent: 'center',
++        //   borderLeftWidth: 1,
++        //   borderBottomWidth: 1,
++        //   borderColor: 'black',
++        //   }, style]}>
++        //   <Text style={[{fontSize: 12,color: 'black',}, textStyle]}>
++        //     {item.location}
++        //   </Text>
++        //  </View>
 +        ))}
-+      </View>: */}
++      </View>:
        <View style={styles.daysContainer}>
          {days.map((day) => (
            <HeaderDay
-@@ -49,7 +76,8 @@ const HeaderPage = ({
+@@ -48,8 +95,9 @@ const HeaderPage = ({
+             width={dayWidth}
            />
          ))}
-       </View>
+-      </View>
 -      <AllDayEvents
++      </View>}
 +      {/* } */}
 +      {/* <AllDayEvents
          style={style}
          allDayEvents={allDayEvents}
          days={days}
-@@ -59,7 +87,7 @@ const HeaderPage = ({
+@@ -59,7 +107,7 @@ const HeaderPage = ({
          EventComponent={EventComponent}
          onEventPress={onEventPress}
          onEventLongPress={onEventLongPress}
@@ -127,50 +149,123 @@ index f3e86bd..43a4874 100644
      </View>
    );
  };
-@@ -88,6 +116,9 @@ const WeekViewHeader = ({
+@@ -88,6 +136,10 @@ const WeekViewHeader = ({
    initialNumToRender,
    maxToRenderPerBatch,
    updateCellsBatchingPeriod,
-+    //custom changes
++  //custom changes
++  isCustom,
 +  customHeaderData,
 +  customDate
  }) => {
    const headerRef = useHeaderRefContext();
  
-@@ -119,6 +150,9 @@ const WeekViewHeader = ({
+@@ -119,6 +171,10 @@ const WeekViewHeader = ({
        EventComponent={EventComponent}
        onEventPress={onEventPress}
        onEventLongPress={onEventLongPress}
-+        //custom changes
++      //custom changes
++      isCustom={isCustom}
 +      customHeaderData={customHeaderData}
 +      customDate={customDate}
      />
    );
  
+@@ -169,6 +225,10 @@ WeekViewHeader.propTypes = {
+   initialNumToRender: PropTypes.number,
+   maxToRenderPerBatch: PropTypes.number,
+   updateCellsBatchingPeriod: PropTypes.number,
++  //custom changes
++  isCustom: PropTypes.bool,
++  customHeaderData: PropTypes.array,
++  customDate: PropTypes.any
+ };
+ 
+ WeekViewHeader.defaultProps = {
+diff --git a/node_modules/react-native-week-view/src/Header/HeaderDay.js b/node_modules/react-native-week-view/src/Header/HeaderDay.js
+index f97e457..7b2a7ea 100644
+--- a/node_modules/react-native-week-view/src/Header/HeaderDay.js
++++ b/node_modules/react-native-week-view/src/Header/HeaderDay.js
+@@ -8,9 +8,13 @@ import styles from './HeaderDay.styles';
+ const DefaultDayComponent = ({ textStyle, formattedDate }) => (
+   <Text style={[styles.text, textStyle]}>{formattedDate}</Text>
+ );
++const CustomLocationComponent = ({ textStyle, title }) => (
++  <Text style={[styles.text, textStyle]}>{title}</Text>
++);
+ 
+ const HeaderDay = ({
+   day,
++  location,
+   format,
+   style,
+   textStyle,
+@@ -18,11 +22,11 @@ const HeaderDay = ({
+   TodayComponent,
+   onDayPress,
+   width,
++
+ }) => {
+   const dateObj = moment(day);
+   const formattedDate = dateObj.format(format);
+   const isToday = moment().isSame(dateObj, 'days');
+-
+   const ComponentChosen =
+     DayComponent || (isToday && TodayComponent) || DefaultDayComponent;
+ 
+@@ -32,18 +36,22 @@ const HeaderDay = ({
+       onPress={() => onDayPress && onDayPress(dateObj.toDate(), formattedDate)}
+       disabled={!onDayPress}
+     >
+-      <ComponentChosen
++      {
++        false ?
++        <ComponentChosen
+         date={day}
+         formattedDate={formattedDate}
+         textStyle={textStyle}
+         isToday={isToday}
+-      />
++        /> : <CustomLocationComponent textStyle={textStyle} title={location} />
++      }
+     </TouchableOpacity>
+   );
+ };
+ 
+ HeaderDay.propTypes = {
+   day: PropTypes.string.isRequired,
++  location: PropTypes.string.isRequired,
+   format: PropTypes.string,
+   style: PropTypes.object,
+   textStyle: PropTypes.object,
 diff --git a/node_modules/react-native-week-view/src/WeekView/WeekView.js b/node_modules/react-native-week-view/src/WeekView/WeekView.js
-index a77c9a9..a1c8890 100644
+index a77c9a9..b0c3f41 100644
 --- a/node_modules/react-native-week-view/src/WeekView/WeekView.js
 +++ b/node_modules/react-native-week-view/src/WeekView/WeekView.js
-@@ -520,6 +520,9 @@ export default class WeekView extends Component {
+@@ -520,6 +520,11 @@ export default class WeekView extends Component {
        disableVirtualization,
        runOnJS,
        onTimeScrolled,
++      //custom changes
++      isCustom,
 +      customHeaderData,
 +      horizontalScrollEnabled,
 +      customDate
      } = this.props;
      const {
        currentMoment,
-@@ -602,6 +605,8 @@ export default class WeekView extends Component {
+@@ -602,6 +607,10 @@ export default class WeekView extends Component {
                initialNumToRender={initialNumToRender}
                maxToRenderPerBatch={maxToRenderPerBatch}
                updateCellsBatchingPeriod={updateCellsBatchingPeriod}
++              //custom changes
++              isCustom={isCustom}
 +              customHeaderData={customHeaderData}
 +              customDate={customDate}
              />
            </View>
            {isRefreshing && RefreshComponent && (
-@@ -636,7 +641,8 @@ export default class WeekView extends Component {
+@@ -636,7 +645,8 @@ export default class WeekView extends Component {
                      getItemLayout={this.getListItemLayout}
                      keyExtractor={identity}
                      initialScrollIndex={PAGES_OFFSET}
@@ -180,28 +275,33 @@ index a77c9a9..a1c8890 100644
                      horizontal
                      // eslint-disable-next-line react/jsx-props-no-spreading
                      {...horizontalScrollProps}
-@@ -679,6 +685,7 @@ export default class WeekView extends Component {
+@@ -679,6 +689,8 @@ export default class WeekView extends Component {
                            editingEventId={editingEvent}
                            editEventConfig={editEventConfig}
                            dragEventConfig={dragEventConfig}
++                          //custom changes
 +                          customDate={customDate}
                          />
                        );
                      }}
-@@ -751,6 +758,9 @@ WeekView.propTypes = {
+@@ -751,6 +763,11 @@ WeekView.propTypes = {
    removeClippedSubviews: PropTypes.bool,
    disableVirtualization: PropTypes.bool,
    runOnJS: PropTypes.bool,
++    //custom changes
++  isCustom: PropTypes.bool,
 +  customHeaderData: PropTypes.array,
 +  horizontalScrollEnabled: PropTypes.bool,
 +  customDate: PropTypes.any
  };
  
  WeekView.defaultProps = {
-@@ -775,4 +785,7 @@ WeekView.defaultProps = {
+@@ -775,4 +792,9 @@ WeekView.defaultProps = {
    removeClippedSubviews: true,
    disableVirtualization: false,
    runOnJS: false,
++  //custom changes
++  isCustom: false,
 +  customHeaderData: [],
 +  horizontalScrollEnabled: true,
 +  customDate: new Date().getTime()
