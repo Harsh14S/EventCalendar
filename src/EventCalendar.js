@@ -256,7 +256,7 @@ export default EventCalendar = () => {
         gridColumnStyle={styles.gridColumn}
         gridRowStyle={styles.gridRow}
         // formatDateHeader=""
-        // formatTimeLabel={''}
+        // formatTimeLabel={}
         hoursInDisplay={3}
         timeStep={60}
         // DayHeaderComponent={CustomeHeaderComponts}
