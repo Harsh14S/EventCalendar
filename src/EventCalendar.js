@@ -257,7 +257,7 @@ export default EventCalendar = () => {
         gridRowStyle={styles.gridRow}
         // formatDateHeader=""
         // formatTimeLabel={''}
-        hoursInDisplay={4}
+        hoursInDisplay={3}
         timeStep={60}
         // DayHeaderComponent={CustomeHeaderComponts}
         startHour={15}
@@ -283,6 +283,7 @@ export default EventCalendar = () => {
         customHeaderData={location}
         horizontalScrollEnabled={false}
         customDate={time}
+        isCustom={true}
       />
     </View>
   );

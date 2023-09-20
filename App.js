@@ -19,7 +19,7 @@ const App = ({}) => {
 
   return (
     <View style={{flex: 1}}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="dark-content" backgroundColor={'white'} />
       <CalendarContextProvider>
         <SafeAreaView style={styles.container}>
           <CalendarDirection />
