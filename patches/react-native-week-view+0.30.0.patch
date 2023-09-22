@@ -10,8 +10,615 @@ index 0c8937a..531586b 100644
  }
  
  declare const WeekView: React.ComponentType<WeekViewProps>;
+diff --git a/node_modules/react-native-week-view/src/CustomEvent/CustomEvent.js b/node_modules/react-native-week-view/src/CustomEvent/CustomEvent.js
+new file mode 100644
+index 0000000..3ff9390
+--- /dev/null
++++ b/node_modules/react-native-week-view/src/CustomEvent/CustomEvent.js
+@@ -0,0 +1,373 @@
++import React from 'react';
++import PropTypes from 'prop-types';
++import { View, Text } from 'react-native';
++import { GestureDetector, Gesture } from 'react-native-gesture-handler';
++import Animated, {
++  useAnimatedStyle,
++  useSharedValue,
++  withSpring,
++  runOnJS,
++  useDerivedValue,
++} from 'react-native-reanimated';
++import styles, { circleStyles } from 'react-native-week-view/src/CustomEvent/CustomEvent.styles';
++import {
++  EventPropType,
++  EditEventConfigPropType,
++  DragEventConfigPropType,
++} from 'react-native-week-view/src/utils/types';
++import { RunGesturesOnJSContext } from 'react-native-week-view/src/utils/gestures';
++import {
++  computeHeight,
++  computeWidth,
++  computeLeft,
++  computeTop,
++} from 'react-native-week-view/src/pipeline/position';
++import { useVerticalDimensionContext } from 'react-native-week-view/src/utils/VerticalDimContext';
++
++const DEFAULT_COLOR = 'red';
++const SIDES = ['bottom', 'top', 'left', 'right'];
++
++const Circle = ({ side }) => (
++  <View
++    style={circleStyles[side]}
++    hitSlop={{ bottom: 10, left: 10, right: 10, top: 10 }}
++  />
++);
++
++const Circles = ({ isEditing, editEventConfig, buildCircleGesture }) =>
++  isEditing
++    ? SIDES.reduce((acc, side) => {
++        if (editEventConfig[side]) {
++          acc.push(
++            <GestureDetector key={side} gesture={buildCircleGesture(side)}>
++              <Circle side={side} />
++            </GestureDetector>,
++          );
++        }
++        return acc;
++      }, [])
++    : [];
++
++const DRAG_STATUS = {
++  STATIC: 0,
++  PRESSING: 1,
++  MOVING: 2,
++};
++
++const Event = ({
++  event,
++  boxStartTimestamp,
++  boxEndTimestamp,
++  lane,
++  nLanes,
++  stackPosition,
++  dayWidth,
++  onPress,
++  onLongPress,
++  EventComponent,
++  containerStyle,
++  textStyle,
++  onDrag,
++  onEdit,
++  editingEventId,
++  editEventConfig,
++  dragEventConfig,
++}) => {
++  const dragAfterLongPress =
++    (dragEventConfig && dragEventConfig.afterLongPressDuration) || 0;
++  const isEditing =
++    dragAfterLongPress === 0 && !!onEdit && editingEventId === event.id;
++  const isDragEnabled =
++    !!onDrag && editingEventId == null && !event.disableDrag;
++
++  const runGesturesOnJS = React.useContext(RunGesturesOnJSContext);
++  const { verticalResolution, beginAgendaAt } = useVerticalDimensionContext();
++
++  // Wrappers are needed due to RN-reanimated runOnJS behavior. See docs:
++  // https://docs.swmansion.com/react-native-reanimated/docs/api/miscellaneous/runOnJS
++  const onPressWrapper = () => onPress && onPress(event);
++  const onLongPressWrapper = () => onLongPress && onLongPress(event);
++  const onDragWrapper = (newX, newY, width) =>
++    onDrag && onDrag(event, newX, newY, width);
++  const onEditWrapper = (side, newPosition) =>
++    onEdit && onEdit(event, side, newPosition);
++
++  const resizeByEdit = {
++    bottom: useSharedValue(0),
++    right: useSharedValue(0),
++    top: useSharedValue(0),
++    left: useSharedValue(0),
++  };
++
++  const translatedByDrag = useSharedValue({ x: 0, y: 0 });
++  const currentWidth = useDerivedValue(() =>
++    computeWidth(
++      boxStartTimestamp,
++      boxEndTimestamp,
++      nLanes,
++      stackPosition,
++      dayWidth,
++    ),
++  );
++  const currentLeft = useDerivedValue(
++    () => computeLeft(lane, nLanes, stackPosition, dayWidth),
++    [boxStartTimestamp, lane, nLanes, stackPosition, dayWidth],
++  );
++  const currentTop = useDerivedValue(() =>
++    computeTop(boxStartTimestamp, verticalResolution, beginAgendaAt),
++  );
++  const currentHeight = useDerivedValue(() =>
++    computeHeight(boxStartTimestamp, boxEndTimestamp, verticalResolution),
++  );
++
++  const dragStatus = useSharedValue(DRAG_STATUS.STATIC);
++  const isPressing = useSharedValue(false);
++  const isLongPressing = useSharedValue(false);
++
++  const currentOpacity = useDerivedValue(() => {
++    if (dragAfterLongPress !== 0 && dragStatus.value === DRAG_STATUS.MOVING) {
++      return 0.2;
++    }
++    if (
++      isPressing.value ||
++      isLongPressing.value ||
++      dragStatus.value !== DRAG_STATUS.STATIC
++    ) {
++      return 0.5;
++    }
++    return 1;
++  });
++
++  const animatedStyles = useAnimatedStyle(() => {
++    return {
++      transform: [
++        { translateX: translatedByDrag.value.x },
++        { translateY: translatedByDrag.value.y },
++      ],
++      width:
++        currentWidth.value + resizeByEdit.right.value - resizeByEdit.left.value,
++      left: currentLeft.value + resizeByEdit.left.value,
++      top: currentTop.value + resizeByEdit.top.value,
++      height:
++        currentHeight.value +
++        resizeByEdit.bottom.value -
++        resizeByEdit.top.value,
++      opacity: withSpring(currentOpacity.value),
++    };
++  });
++
++  const dragGesture = Gesture.Pan()
++    .enabled(isDragEnabled)
++    .withTestId(`dragGesture-${event.id}`)
++    .runOnJS(runGesturesOnJS)
++    .onTouchesDown(() => {
++      dragStatus.value = DRAG_STATUS.PRESSING;
++    })
++    .onStart(() => {
++      dragStatus.value = DRAG_STATUS.MOVING;
++    })
++    .onUpdate((e) => {
++      translatedByDrag.value = {
++        x: e.translationX,
++        y: e.translationY,
++      };
++    })
++    .onEnd((evt, success) => {
++      if (!success) {
++        translatedByDrag.value = { x: 0, y: 0 };
++        return;
++      }
++      const { translationX, translationY } = evt;
++
++      // NOTE: do not delete these auxiliar variables
++      // currentDimension.value might be updated asyncly in some cases
++      const newX = currentLeft.value + translationX;
++      const newY = currentTop.value + translationY;
++      const width = currentWidth.value;
++
++      currentTop.value += translationY;
++      currentLeft.value += translationX;
++      translatedByDrag.value = { x: 0, y: 0 };
++
++      runOnJS(onDragWrapper)(newX, newY, width);
++    })
++    .onFinalize(() => {
++      dragStatus.value = DRAG_STATUS.STATIC;
++    });
++
++  /**
++   * Wrapper for RNGH version compatibility.
++   *
++   * Only RNGH >= 2.6.0 supports `activateAfterLongPress()`,
++   * i.e. if using RNGH < 2.6.0, user must provide `dragAfterLongPress = 0`
++   * and no errors are thrown.
++   */
++  const wrappedDragGesture =
++    dragAfterLongPress > 0
++      ? dragGesture.activateAfterLongPress(dragAfterLongPress)
++      : dragGesture;
++
++  const longPressGesture = Gesture.LongPress()
++    .enabled(
++      dragAfterLongPress === 0 && !!onLongPress && !event.disableLongPress,
++    )
++    .runOnJS(runGesturesOnJS)
++    .maxDistance(20)
++    .onTouchesDown(() => {
++      isLongPressing.value = true;
++    })
++    .onEnd((evt, success) => {
++      if (success) {
++        runOnJS(onLongPressWrapper)();
++      }
++    })
++    .onFinalize(() => {
++      isLongPressing.value = false;
++    });
++
++  const pressGesture = Gesture.Tap()
++    .enabled(!!onPress && !event.disablePress)
++    .runOnJS(runGesturesOnJS)
++    .withTestId(`pressGesture-${event.id}`)
++    .onTouchesDown(() => {
++      isPressing.value = true;
++    })
++    .onEnd((evt, success) => {
++      if (success) {
++        runOnJS(onPressWrapper)();
++      }
++    })
++    .onFinalize(() => {
++      isPressing.value = false;
++    });
++
++  const composedGesture = Gesture.Race(
++    wrappedDragGesture,
++    longPressGesture,
++    pressGesture,
++  );
++
++  const buildCircleGesture = (side) =>
++    Gesture.Pan()
++      .runOnJS(runGesturesOnJS)
++      .onUpdate((panEvt) => {
++        const { translationX, translationY } = panEvt;
++        switch (side) {
++          case 'top':
++            if (translationY < currentHeight.value) {
++              resizeByEdit.top.value = translationY;
++            }
++            break;
++          case 'bottom':
++            if (translationY > -currentHeight.value) {
++              resizeByEdit.bottom.value = translationY;
++            }
++            break;
++          case 'left':
++            if (translationX < currentWidth.value) {
++              resizeByEdit.left.value = translationX;
++            }
++            break;
++          case 'right':
++            if (translationX > -currentWidth.value) {
++              resizeByEdit.right.value = translationX;
++            }
++            break;
++          default:
++        }
++      })
++      .onEnd((panEvt, success) => {
++        if (!success) {
++          resizeByEdit[side].value = 0;
++          return;
++        }
++        const resizedAmount = resizeByEdit[side].value;
++        resizeByEdit[side].value = 0;
++        let newPosition = 0;
++
++        switch (side) {
++          case 'top':
++            newPosition = currentTop.value + resizedAmount;
++
++            currentTop.value += resizedAmount;
++            currentHeight.value -= resizedAmount;
++            break;
++          case 'bottom':
++            newPosition =
++              currentTop.value + currentHeight.value + resizedAmount;
++
++            currentHeight.value += resizedAmount;
++            break;
++          case 'left':
++            newPosition = currentLeft.value + resizedAmount;
++
++            currentLeft.value += resizedAmount;
++            currentWidth.value -= resizedAmount;
++            break;
++          case 'right':
++            newPosition =
++              currentLeft.value + currentWidth.value + resizedAmount;
++
++            currentWidth.value += resizedAmount;
++            break;
++          default:
++        }
++
++        runOnJS(onEditWrapper)(side, newPosition);
++      });
++
++  return (
++    <GestureDetector gesture={composedGesture}>
++      <Animated.View
++        testID={`WeekViewEvent-${event.id}`}
++        accessible
++        accessibilityLabel={`Show event ${event.id}`}
++        accessibilityHint={`Show event ${event.id}`}
++        style={[
++          styles.container,
++          {
++            backgroundColor: event.color || DEFAULT_COLOR,
++          },
++          containerStyle,
++          event.style,
++          animatedStyles,
++        ]}
++      >
++        {EventComponent ? (
++          <EventComponent event={event} />
++        ) : (
++          <Text style={[styles.description, textStyle, event.textStyle]}>
++            {event.description}
++          </Text>
++        )}
++        <Circles
++          isEditing={isEditing}
++          editEventConfig={editEventConfig}
++          buildCircleGesture={buildCircleGesture}
++        />
++      </Animated.View>
++    </GestureDetector>
++  );
++};
++
++Event.propTypes = {
++  event: EventPropType.isRequired,
++  boxStartTimestamp: PropTypes.number.isRequired,
++  boxEndTimestamp: PropTypes.number.isRequired,
++  lane: PropTypes.number,
++  nLanes: PropTypes.number,
++  stackPosition: PropTypes.number,
++  dayWidth: PropTypes.number.isRequired,
++  onPress: PropTypes.func,
++  onLongPress: PropTypes.func,
++  containerStyle: PropTypes.object,
++  textStyle: PropTypes.object,
++  EventComponent: PropTypes.elementType,
++  dragEventConfig: DragEventConfigPropType,
++  onDrag: PropTypes.func,
++  onEdit: PropTypes.func,
++  editingEventId: PropTypes.number,
++  editEventConfig: EditEventConfigPropType,
++};
++
++export default React.memo(Event);
+diff --git a/node_modules/react-native-week-view/src/CustomEvent/CustomEvent.styles.js b/node_modules/react-native-week-view/src/CustomEvent/CustomEvent.styles.js
+new file mode 100644
+index 0000000..89ef776
+--- /dev/null
++++ b/node_modules/react-native-week-view/src/CustomEvent/CustomEvent.styles.js
+@@ -0,0 +1,51 @@
++import { StyleSheet } from 'react-native';
++
++const styles = StyleSheet.create({
++  container: {
++    alignItems: 'center',
++    position: 'absolute',
++    borderRadius: 0,
++    flex: 1,
++  },
++  description: {
++    marginVertical: 8,
++    marginHorizontal: 2,
++    color: '#fff',
++    textAlign: 'center',
++    fontSize: 15,
++  },
++});
++
++const circleDiameter = 15;
++const baseCircleStyle = {
++  position: 'absolute',
++  borderColor: 'black',
++  borderWidth: 1,
++  borderRadius: circleDiameter,
++  height: circleDiameter,
++  width: circleDiameter,
++  backgroundColor: 'white',
++};
++
++export const circleStyles = StyleSheet.create({
++  top: {
++    ...baseCircleStyle,
++    top: -circleDiameter / 2,
++  },
++  bottom: {
++    ...baseCircleStyle,
++    bottom: -circleDiameter / 2,
++  },
++  left: {
++    ...baseCircleStyle,
++    left: -circleDiameter / 2,
++    top: '50%',
++  },
++  right: {
++    ...baseCircleStyle,
++    right: -circleDiameter / 2,
++    top: '50%',
++  },
++});
++
++export default styles;
+diff --git a/node_modules/react-native-week-view/src/CustomEvents/CustomEvents.js b/node_modules/react-native-week-view/src/CustomEvents/CustomEvents.js
+new file mode 100644
+index 0000000..6adba4d
+--- /dev/null
++++ b/node_modules/react-native-week-view/src/CustomEvents/CustomEvents.js
+@@ -0,0 +1,127 @@
++import { Text, View } from 'react-native'
++import React, { useContext, useEffect } from 'react'
++import { VerticalDimensionContext, useVerticalDimensionContext } from 'react-native-week-view/src/utils/VerticalDimContext';
++import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
++import styles from './CustomEvents.styles';
++import { topToSecondsInDay as topToSecondsInDayFromUtils } from '../utils/dimensions';
++import { ViewWithTouchable } from 'react-native-week-view/src/utils/gestures';
++import moment from 'moment';
++
++
++// const processEvents = (
++//   eventsByDate,
++//   initialDate,
++//   numberOfDays,
++//   rightToLeft,
++// ) => {
++//   // totalEvents stores events in each day of numberOfDays
++//   // example: [[event1, event2], [event3, event4], [event5]], each child array
++//   // is events for specific day in range
++//   const dates = calculateDaysArray(initialDate, numberOfDays, rightToLeft);
++//   return dates.map((date) => resolveEventOverlaps(eventsByDate[date] || []));
++// };
++
++const Lines = ({ initialDate, times, gridRowStyle }) => {
++  const { timeLabelHeight } = useVerticalDimensionContext();
++  const heightStyle = useAnimatedStyle(() => ({
++    height: withTiming(timeLabelHeight.value),
++  }));
++  // useEffect(() => {
++  //   // console.log('times ---0--> ', times)
++  // }, [times])
++  return times.map((time) => (
++    <Animated.View
++      key={`${initialDate}-${time}`}
++      style={[styles.timeRow, gridRowStyle, heightStyle]}
++    >
++      <View style={{ flex: 1 }} />
++      <View style={[styles.timeRow,{flex: 1, borderTopWidth: 1,borderColor: '#E9EDF066'}]} />
++      <View style={[styles.timeRow,{flex: 1,borderTopWidth: 1,borderColor: '#E9EDF066'}]} />
++      <View style={[styles.timeRow,{flex: 1, borderTopWidth: 1,borderColor: '#E9EDF066'}]} />
++    </Animated.View>
++  ));
++};
++
++const CustomEvents = (props) => {
++  const {verticalResolution} = useContext(VerticalDimensionContext);
++  const {
++    initialDate,
++    times,
++    gridRowStyle,
++    pageWidth,
++    dayWidth,
++    onGridClick,
++    onGridLongPress,
++    beginAgendaAt,
++    customHeaderData,
++    gridColumnStyle
++  } = props;
++
++
++  // const {dateS, location, timeStamp} = initialDate;
++
++  const topToSecondsInDay = (yValue) =>
++  topToSecondsInDayFromUtils(
++    yValue,
++    verticalResolution,
++    beginAgendaAt,
++  );
++  const xToDayIndex = (xValue) => Math.floor(xValue / dayWidth);
++  const handleGridTouch = (pressEvt, callback) => {
++    if (!callback) {
++      return;
++    }
++    const dayIndex = xToDayIndex(pressEvt.x);
++    const secondsInDay = topToSecondsInDay(pressEvt.y);
++
++    const dateWithTime = moment(initialDate)
++      .startOf('day')
++      .seconds(secondsInDay)
++      .toDate();
++
++      // console.log('dateWithTime ----> ', dayIndex)
++      // console.log('secondsInDay ----> ', secondsInDay)
++      // console.log('dateWithTime ----> ', dateWithTime)
++
++    callback(pressEvt, dateWithTime.getHours(), dateWithTime, dateWithTime);
++  };
++
++
++  const handleGridPress = (pressEvt) => {
++    handleGridTouch(pressEvt, onGridClick);
++  };
++
++  const handleGridLongPress = (pressEvt) => {
++    handleGridTouch(pressEvt, onGridLongPress);
++  };
++
++  return (
++    <View style={[styles.container, { width: pageWidth }]}>
++      <Lines
++        initialDate={initialDate}
++        times={times}
++        gridRowStyle={gridRowStyle}
++      />
++      <ViewWithTouchable
++        style={styles.eventsContainer}
++        onPress={onGridClick && handleGridPress}
++        onLongPress={onGridLongPress && handleGridLongPress}
++      >
++        {
++          customHeaderData?.map((item, index) =>
++          <View
++            style={[styles.eventsColumn, gridColumnStyle]}
++            pointerEvents="box-none"
++            key={index}
++          ></View>
++      )
++    }
++        {/* <View style={{flex: 1, backgroundColor: 'grey', borderWidth: 1}}></View> */}
++      </ViewWithTouchable>
++      {/* <Text>CustomEvents</Text> */}
++    </View>
++  )
++}
++
++export default CustomEvents
++
+diff --git a/node_modules/react-native-week-view/src/CustomEvents/CustomEvents.styles.js b/node_modules/react-native-week-view/src/CustomEvents/CustomEvents.styles.js
+new file mode 100644
+index 0000000..df75638
+--- /dev/null
++++ b/node_modules/react-native-week-view/src/CustomEvents/CustomEvents.styles.js
+@@ -0,0 +1,32 @@
++import { StyleSheet } from 'react-native';
++import { CONTENT_TOP_PADDING } from 'react-native-week-view/src/utils/dimensions';
++
++const GREY_COLOR = '#E9EDF0';
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    paddingTop: CONTENT_TOP_PADDING,
++  },
++  timeRow: {
++    borderTopWidth: 1,
++    borderColor: GREY_COLOR,
++    backgroundColor: 'transparent',
++  },
++  eventsColumn: {
++    flex: 1,
++    borderColor: GREY_COLOR,
++    borderLeftWidth: 1,
++  },
++  eventsContainer: {
++    position: 'absolute',
++    flexDirection: 'row',
++    left: 0,
++    right: 0,
++    bottom: 0,
++    top: 0,
++    backgroundColor: 'transparent',
++  },
++});
++
++export default styles;
 diff --git a/node_modules/react-native-week-view/src/Events/Events.js b/node_modules/react-native-week-view/src/Events/Events.js
-index 5784d33..24edeb8 100644
+index 5784d33..8213de8 100644
 --- a/node_modules/react-native-week-view/src/Events/Events.js
 +++ b/node_modules/react-native-week-view/src/Events/Events.js
 @@ -1,4 +1,4 @@
@@ -34,24 +641,76 @@ index 5784d33..24edeb8 100644
 -    />
 +    >
 +      <View style={{ flex: 1 }} />
-+      <View style={[styles.timeRow,{flex: 1, borderTopWidth: 1,borderColor: '#E9EDF066'}]} />
-+      <View style={[styles.timeRow,{flex: 1,borderTopWidth: 1,borderColor: '#E9EDF066'}]} />
-+      <View style={[styles.timeRow,{flex: 1, borderTopWidth: 1,borderColor: '#E9EDF066'}]} />
++      <View style={[styles.timeRow,{flex: 1, borderTopWidth: 1,borderColor: '#E9EDF077'}]} />
++      <View style={[styles.timeRow,{flex: 1,borderTopWidth: 1,borderColor: '#E9EDF077'}]} />
++      <View style={[styles.timeRow,{flex: 1, borderTopWidth: 1,borderColor: '#E9EDF077'}]} />
 +    </Animated.View>
    ));
  };
  
-@@ -84,6 +92,8 @@ class Events extends PureComponent {
-       .seconds(secondsInDay)
-       .toDate();
+@@ -79,11 +87,14 @@ class Events extends PureComponent {
+     const secondsInDay = this.topToSecondsInDay(pressEvt.y);
  
-+      console.log('dateWithTime ----> ', dateWithTime)
-+
+     const dateWithTime = moment(this.props.initialDate)
+-      .add(dayIndex, 'day')
+-      .startOf('day')
+-      .seconds(secondsInDay)
+-      .toDate();
+-
++    .add(dayIndex, 'day')
++    .startOf('day')
++    .seconds(secondsInDay)
++    .toDate();
++    // console.log('dayIndex ====> ', dayIndex);
++    // console.log('secondsInDay ====> ', secondsInDay);
++    // console.log('dateWithTime ----> ', this.props.initialDate);
++    console.log('dateWithTime ----> ', dateWithTime);
      callback(pressEvt, dateWithTime.getHours(), dateWithTime);
    };
  
+@@ -194,6 +205,7 @@ class Events extends PureComponent {
+       editingEventId,
+       editEventConfig,
+       dragEventConfig,
++      isCustom
+     } = this.props;
+     const totalEvents = this.processEvents(
+       eventsByDate,
+@@ -214,6 +226,7 @@ class Events extends PureComponent {
+           onPress={onGridClick && this.handleGridPress}
+           onLongPress={onGridLongPress && this.handleGridLongPress}
+         >
++          {/* {console.log('totalEvents -----> ', totalEvents)} */}
+           {totalEvents.map((eventsInSection, dayIndex) => (
+             <View
+               style={[styles.eventsColumn, gridColumnStyle]}
+@@ -227,6 +240,7 @@ class Events extends PureComponent {
+                   beginAgendaAt={beginAgendaAt}
+                 />
+               )}
++              {console.log('eventsInSection -----> ',eventsInSection)}
+               {eventsInSection.map((item) => {
+                 const { ref: event, box, overlap = {} } = item;
+                 return (
+@@ -249,6 +263,7 @@ class Events extends PureComponent {
+                     editingEventId={editingEventId}
+                     editEventConfig={editEventConfig}
+                     dragEventConfig={dragEventConfig}
++                    isCustom={isCustom}
+                   />
+                 );
+               })}
+@@ -286,6 +301,8 @@ Events.propTypes = {
+   dayWidth: PropTypes.number.isRequired,
+   onEditEvent: PropTypes.func,
+   editingEventId: PropTypes.number,
++  //custom changes
++  isCustom: PropTypes.bool
+ };
+ 
+ export default Events;
 diff --git a/node_modules/react-native-week-view/src/Header/Header.js b/node_modules/react-native-week-view/src/Header/Header.js
-index f3e86bd..d72d9e1 100644
+index f3e86bd..ebb8dfc 100644
 --- a/node_modules/react-native-week-view/src/Header/Header.js
 +++ b/node_modules/react-native-week-view/src/Header/Header.js
 @@ -1,6 +1,6 @@
@@ -71,21 +730,19 @@ index f3e86bd..d72d9e1 100644
  
  const identity = (item) => item;
  
-@@ -30,10 +31,56 @@ const HeaderPage = ({
+@@ -30,10 +31,42 @@ const HeaderPage = ({
    EventComponent,
    onEventPress,
    onEventLongPress,
 +  //custom changes
 +  isCustom,
-+  customHeaderData,
++  headerData,
 +  customDate
  }) => {
    const days = calculateDaysArray(initialDate, numberOfDays, rightToLeft) || [];
-+  const headerData = isCustom && customHeaderData?.length ? customHeaderData?.map((item) => {
-+    return {location: item, timeStamp: customDate, dateS: moment(customDate).format('YYYY-MM-DD')}
-+  }) : days;
++  const locationData = isCustom && headerData?.length ? headerData : days;
 +  useEffect(() => {
-+    // let arr = customHeaderData.map((item) => {
++    // let arr = headerData.map((item) => {
 +
 +    //   return {location: item, date: customDate}
 +    // })
@@ -95,9 +752,9 @@ index f3e86bd..d72d9e1 100644
    return (
      <View style={styles.container}>
 +      {
-+        customHeaderData?.length ?
++         isCustom  ?
 +        <View style={styles.daysContainer}>
-+        {headerData.map((item, index) => (
++        {locationData.map((item, index) => (
 +          <HeaderDay
 +            style={style}
 +            textStyle={textStyle}
@@ -109,38 +766,25 @@ index f3e86bd..d72d9e1 100644
 +            TodayComponent={TodayComponent}
 +            onDayPress={onDayPress}
 +            width={dayWidth}
++            isCustom={isCustom}
 +          />
-+        //  <View key={index} style={[{
-+        //   width: dayWidth,
-+        //   flex: 1,
-+        //   alignItems: 'center',
-+        //   justifyContent: 'center',
-+        //   borderLeftWidth: 1,
-+        //   borderBottomWidth: 1,
-+        //   borderColor: 'black',
-+        //   }, style]}>
-+        //   <Text style={[{fontSize: 12,color: 'black',}, textStyle]}>
-+        //     {item.location}
-+        //   </Text>
-+        //  </View>
 +        ))}
 +      </View>:
        <View style={styles.daysContainer}>
          {days.map((day) => (
            <HeaderDay
-@@ -48,8 +95,9 @@ const HeaderPage = ({
+@@ -48,8 +81,8 @@ const HeaderPage = ({
              width={dayWidth}
            />
          ))}
 -      </View>
 -      <AllDayEvents
 +      </View>}
-+      {/* } */}
 +      {/* <AllDayEvents
          style={style}
          allDayEvents={allDayEvents}
          days={days}
-@@ -59,7 +107,7 @@ const HeaderPage = ({
+@@ -59,7 +92,7 @@ const HeaderPage = ({
          EventComponent={EventComponent}
          onEventPress={onEventPress}
          onEventLongPress={onEventLongPress}
@@ -149,41 +793,41 @@ index f3e86bd..d72d9e1 100644
      </View>
    );
  };
-@@ -88,6 +136,10 @@ const WeekViewHeader = ({
+@@ -88,6 +121,10 @@ const WeekViewHeader = ({
    initialNumToRender,
    maxToRenderPerBatch,
    updateCellsBatchingPeriod,
 +  //custom changes
 +  isCustom,
-+  customHeaderData,
++  headerData,
 +  customDate
  }) => {
    const headerRef = useHeaderRefContext();
  
-@@ -119,6 +171,10 @@ const WeekViewHeader = ({
+@@ -119,6 +156,10 @@ const WeekViewHeader = ({
        EventComponent={EventComponent}
        onEventPress={onEventPress}
        onEventLongPress={onEventLongPress}
 +      //custom changes
 +      isCustom={isCustom}
-+      customHeaderData={customHeaderData}
++      headerData={headerData}
 +      customDate={customDate}
      />
    );
  
-@@ -169,6 +225,10 @@ WeekViewHeader.propTypes = {
+@@ -169,6 +210,10 @@ WeekViewHeader.propTypes = {
    initialNumToRender: PropTypes.number,
    maxToRenderPerBatch: PropTypes.number,
    updateCellsBatchingPeriod: PropTypes.number,
 +  //custom changes
 +  isCustom: PropTypes.bool,
-+  customHeaderData: PropTypes.array,
++  headerData: PropTypes.array,
 +  customDate: PropTypes.any
  };
  
  WeekViewHeader.defaultProps = {
 diff --git a/node_modules/react-native-week-view/src/Header/HeaderDay.js b/node_modules/react-native-week-view/src/Header/HeaderDay.js
-index f97e457..7b2a7ea 100644
+index f97e457..4619eb7 100644
 --- a/node_modules/react-native-week-view/src/Header/HeaderDay.js
 +++ b/node_modules/react-native-week-view/src/Header/HeaderDay.js
 @@ -8,9 +8,13 @@ import styles from './HeaderDay.styles';
@@ -200,10 +844,11 @@ index f97e457..7b2a7ea 100644
    format,
    style,
    textStyle,
-@@ -18,11 +22,11 @@ const HeaderDay = ({
+@@ -18,32 +22,37 @@ const HeaderDay = ({
    TodayComponent,
    onDayPress,
    width,
++  isCustom
 +
  }) => {
    const dateObj = moment(day);
@@ -212,21 +857,28 @@ index f97e457..7b2a7ea 100644
 -
    const ComponentChosen =
      DayComponent || (isToday && TodayComponent) || DefaultDayComponent;
- 
-@@ -32,18 +36,22 @@ const HeaderDay = ({
+-
+   return (
+     <TouchableOpacity
+       style={[styles.container, style, { width }]}
        onPress={() => onDayPress && onDayPress(dateObj.toDate(), formattedDate)}
        disabled={!onDayPress}
      >
 -      <ComponentChosen
-+      {
-+        false ?
-+        <ComponentChosen
-         date={day}
-         formattedDate={formattedDate}
-         textStyle={textStyle}
-         isToday={isToday}
+-        date={day}
+-        formattedDate={formattedDate}
+-        textStyle={textStyle}
+-        isToday={isToday}
 -      />
-+        /> : <CustomLocationComponent textStyle={textStyle} title={location} />
++      {
++        isCustom ?
++        <CustomLocationComponent textStyle={textStyle} title={location} /> :
++        <ComponentChosen
++          date={day}
++          formattedDate={formattedDate}
++          textStyle={textStyle}
++          isToday={isToday}
++        />
 +      }
      </TouchableOpacity>
    );
@@ -238,11 +890,59 @@ index f97e457..7b2a7ea 100644
    format: PropTypes.string,
    style: PropTypes.object,
    textStyle: PropTypes.object,
+@@ -51,6 +60,7 @@ HeaderDay.propTypes = {
+   TodayComponent: PropTypes.elementType,
+   onDayPress: PropTypes.func,
+   width: PropTypes.number.isRequired,
++  isCustom: PropTypes.bool
+ };
+ 
+ export default HeaderDay;
 diff --git a/node_modules/react-native-week-view/src/WeekView/WeekView.js b/node_modules/react-native-week-view/src/WeekView/WeekView.js
-index a77c9a9..b0c3f41 100644
+index a77c9a9..f4ee52b 100644
 --- a/node_modules/react-native-week-view/src/WeekView/WeekView.js
 +++ b/node_modules/react-native-week-view/src/WeekView/WeekView.js
-@@ -520,6 +520,11 @@ export default class WeekView extends Component {
+@@ -5,11 +5,13 @@ import {
+   InteractionManager,
+   ActivityIndicator,
+   Dimensions,
++  FlatList,
+ } from 'react-native';
+ import { GestureHandlerRootView } from 'react-native-gesture-handler';
+ import moment from 'moment';
+ import memoizeOne from 'memoize-one';
+ 
++import CustomEvents from '../CustomEvents/CustomEvents';
+ import Events from '../Events/Events';
+ import Header from '../Header/Header';
+ import Title from '../Title/Title';
+@@ -239,25 +241,6 @@ export default class WeekView extends Component {
+     );
+   };
+ 
+-  goToNextPage = (options) =>
+-    this.goToPageIndex(
+-      this.currentPageIndex + this.getSignToTheFuture(),
+-      null,
+-      options,
+-    );
+-
+-  goToPrevPage = (options) =>
+-    this.goToPageIndex(
+-      this.currentPageIndex - this.getSignToTheFuture(),
+-      null,
+-      options,
+-    );
+-
+-  goToNextDay = (options) =>
+-    this.goToDate(moment(this.state.currentMoment).add(1, 'day'), options);
+-
+-  goToPrevDay = (options) =>
+-    this.goToDate(moment(this.state.currentMoment).add(-1, 'day'), options);
+ 
+   /**
+    * Computes the targetIndex and newState for a goToPage operation.
+@@ -520,6 +503,11 @@ export default class WeekView extends Component {
        disableVirtualization,
        runOnJS,
        onTimeScrolled,
@@ -254,18 +954,56 @@ index a77c9a9..b0c3f41 100644
      } = this.props;
      const {
        currentMoment,
-@@ -602,6 +607,10 @@ export default class WeekView extends Component {
+@@ -566,6 +554,10 @@ export default class WeekView extends Component {
+           pagingEnabled: true,
+         };
+ 
++    const flatListData = customHeaderData?.map((item) => {
++      return {location: item, timeStamp: customDate, dateS: moment(customDate).format('YYYY-MM-DD')}
++    })
++
+     return (
+       <GestureHandlerRootView style={styles.container}>
+         <HeaderRefContextProvider>
+@@ -602,6 +594,10 @@ export default class WeekView extends Component {
                initialNumToRender={initialNumToRender}
                maxToRenderPerBatch={maxToRenderPerBatch}
                updateCellsBatchingPeriod={updateCellsBatchingPeriod}
 +              //custom changes
 +              isCustom={isCustom}
-+              customHeaderData={customHeaderData}
++              headerData={flatListData}
 +              customDate={customDate}
              />
            </View>
            {isRefreshing && RefreshComponent && (
-@@ -636,7 +645,8 @@ export default class WeekView extends Component {
+@@ -631,12 +627,35 @@ export default class WeekView extends Component {
+                   width={timeLabelsWidth}
+                 />
+                 <RunGesturesOnJSContext.Provider value={runOnJS}>
++                  {/* {console.log('initialDates -----> ', initialDates)} */}
++                  {isCustom ?
++                  <FlatList
++                    data={customHeaderData}
++                    horizontal
++                    keyExtractor={(item, index) => index}
++                    renderItem={({ item }) => {
++                      return (
++                        <CustomEvents
++                          initialDate={moment(customDate).format('YYYY-MM-DD')}
++                          times={times}
++                          onGridClick={onGridClick}
++                          onGridLongPress={onGridLongPress}
++                          pageWidth={pageWidth}
++                          dayWidth={dayWidth}
++                          beginAgendaAt={beginAgendaAt}
++                          customHeaderData={customHeaderData}
++                          gridColumnStyle={gridColumnStyle}
++                        />
++                      );
++                    }}
++                  /> :
+                   <HorizontalSyncFlatList
+                     data={initialDates}
                      getItemLayout={this.getListItemLayout}
                      keyExtractor={identity}
                      initialScrollIndex={PAGES_OFFSET}
@@ -275,7 +1013,7 @@ index a77c9a9..b0c3f41 100644
                      horizontal
                      // eslint-disable-next-line react/jsx-props-no-spreading
                      {...horizontalScrollProps}
-@@ -679,6 +689,8 @@ export default class WeekView extends Component {
+@@ -679,10 +698,12 @@ export default class WeekView extends Component {
                            editingEventId={editingEvent}
                            editEventConfig={editEventConfig}
                            dragEventConfig={dragEventConfig}
@@ -284,7 +1022,12 @@ index a77c9a9..b0c3f41 100644
                          />
                        );
                      }}
-@@ -751,6 +763,11 @@ WeekView.propTypes = {
+-                  />
++                  />}
+                 </RunGesturesOnJSContext.Provider>
+               </View>
+             </VerticalAgenda>
+@@ -751,6 +772,11 @@ WeekView.propTypes = {
    removeClippedSubviews: PropTypes.bool,
    disableVirtualization: PropTypes.bool,
    runOnJS: PropTypes.bool,
@@ -296,7 +1039,7 @@ index a77c9a9..b0c3f41 100644
  };
  
  WeekView.defaultProps = {
-@@ -775,4 +792,9 @@ WeekView.defaultProps = {
+@@ -775,4 +801,9 @@ WeekView.defaultProps = {
    removeClippedSubviews: true,
    disableVirtualization: false,
    runOnJS: false,
@@ -306,3 +1049,60 @@ index a77c9a9..b0c3f41 100644
 +  horizontalScrollEnabled: true,
 +  customDate: new Date().getTime()
  };
+diff --git a/node_modules/react-native-week-view/src/utils/HorizontalScroll.js b/node_modules/react-native-week-view/src/utils/HorizontalScroll.js
+index d8dd23b..68d9555 100644
+--- a/node_modules/react-native-week-view/src/utils/HorizontalScroll.js
++++ b/node_modules/react-native-week-view/src/utils/HorizontalScroll.js
+@@ -75,3 +75,52 @@ export const HorizontalSyncFlatList = React.forwardRef(
+     );
+   },
+ );
++
++export const CustomHorizontalSyncFlatList = React.forwardRef(
++  ({ horizontalScrollEnded, ...props }, ref) => {
++    const headerRef = useHeaderRefContext();
++
++    const gridScrollOffset = useSharedValue(0);
++    useAnimatedReaction(
++      () => gridScrollOffset.value,
++      (newScrollOffset) => {
++        if (headerRef) {
++          scrollTo(headerRef, newScrollOffset, 0, true);
++        }
++      },
++    );
++
++    const callbackWrapper = (...args) => {
++      horizontalScrollEnded(...args);
++    };
++    const isScrollingHorizontal = useSharedValue(false); // avoid calling multiple times
++    const scrollHandler = useAnimatedScrollHandler({
++      onScroll: (scrollEvent) => {
++        gridScrollOffset.value = scrollEvent.contentOffset.x;
++      },
++      onMomentumBegin: () => {
++        isScrollingHorizontal.value = true;
++      },
++      onMomentumEnd: (scrollEvent) => {
++        if (!isScrollingHorizontal.value) {
++          return;
++        }
++        const { contentOffset } = scrollEvent;
++        const { x: newXPosition } = contentOffset;
++        // NOTE: we're passing the least information possible thru the bridge
++        runOnJS(callbackWrapper)(newXPosition);
++        isScrollingHorizontal.value = false;
++      },
++    });
++
++    return (
++      <ReanimatedFlatList
++        onScroll={scrollHandler}
++        horizontal
++        ref={ref}
++        // eslint-disable-next-line react/jsx-props-no-spreading
++        {...props}
++      />
++    );
++  },
++);

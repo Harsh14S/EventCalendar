@@ -10,19 +10,24 @@ import WeekView, {createFixedWeekDate} from 'react-native-week-view';
 import {buildDateCycler, makeBuilder, eventsWithUpdate} from './debug-utils';
 import {CalendarContext} from '../global/CalendarContext';
 import moment from 'moment';
+import CustomDraggable from './CustomDraggable';
 
 const buildEvent = makeBuilder();
 const date = new Date();
 
 const createDummyEvent = ({startDate, duration}) => {
   const endDate = new Date(startDate.getTime());
-  endDate.setHours(startDate.getHours() + duration);
-  return {
+  endDate.setMinutes(startDate.getMinutes() + duration);
+  const event = {
     description: 'New Event',
     color: 'lightblue',
     startDate,
     endDate,
+    // startDate: moment(startDate).format('HH:mm'),
+    // endDate: moment(endDate).format('HH:mm'),
   };
+  // console.log('event =====> ', event);
+  return event;
 };
 
 const eventsWithAddingNew = (prevEvents, payload) => {
@@ -36,6 +41,8 @@ const eventsWithAddingNew = (prevEvents, payload) => {
     },
   ];
 };
+
+// const sampleEvents = [];
 
 // const sampleEvents = [
 //   // Previous week
@@ -82,24 +89,24 @@ const eventsWithAddingNew = (prevEvents, payload) => {
 //   // ),
 // ];
 
-// const sampleFixedEvents = [
-//   {
-//     id: 1,
-//     title: 'Event 1',
-//     startDate: createFixedWeekDate('Monday', 12),
-//     endDate: createFixedWeekDate(1, 14),
-//     color: 'blue',
-//     description: 'This is a test description',
-//   },
-//   {
-//     id: 2,
-//     title: 'Event 2',
-//     startDate: createFixedWeekDate('wed', 16),
-//     endDate: createFixedWeekDate(3, 17, 30),
-//     description: 'This is a test description',
-//     color: 'red',
-//   },
-// ];
+const sampleFixedEvents = [
+  {
+    id: 1,
+    title: 'Event 1',
+    startDate: createFixedWeekDate('Monday', 12),
+    endDate: createFixedWeekDate(1, 14),
+    color: 'blue',
+    description: 'This is a test description',
+  },
+  {
+    id: 2,
+    title: 'Event 2',
+    startDate: createFixedWeekDate('wed', 16),
+    endDate: createFixedWeekDate(3, 17, 30),
+    description: 'This is a test description',
+    color: 'red',
+  },
+];
 
 // const INITIAL_EVENTS = showFixedComponent ? sampleFixedEvents : sampleEvents;
 const countries = [
@@ -210,11 +217,12 @@ export default EventCalendar = () => {
       return;
     }
 
-    updateEvent(createDummyEvent({startDate: date, duration: 2}));
-    Alert.alert(moment(date).format('HH:mm A DD, MMM-YYYY'));
+    // updateEvent(createDummyEvent({startDate: date, duration: 45}));
+    // Alert.alert(moment(date).format('HH:mm A DD, MMM-YYYY'));
+    // console.log('date ----> ', moment(date).format('DD-MM-YYYY'));
   };
 
-  const handlePressGrid = () => {
+  const handlePressGrid = (event, startHour, date) => {
     if (editingEvent != null) {
       setEditEvent(null);
       return;
@@ -225,9 +233,11 @@ export default EventCalendar = () => {
     const hour = date.getHours();
     const minutes = date.getMinutes();
     const seconds = date.getSeconds();
-    // buildEvent(0, hour, 'yellow', {resolveOverlap: 'lane'});
+    // buildEvent(startHour, 2, 'yellow', {resolveOverlap: 'lane'});
     // buildEvent(1, 2, 'blue', {resolveOverlap: 'lane'});
-    Alert.alert(`${year}-${month}-${day} ${hour}:${minutes}:${seconds}`);
+    // Alert.alert(`${year}-${month}-${day} ${hour}:${minutes}:${seconds}`);
+    // Alert.alert(`${event}`);
+    // console.log('Date loggggg ----> ', date);
   };
 
   const onMonthPress = useCallback((date, formattedDate) => {
@@ -242,6 +252,7 @@ export default EventCalendar = () => {
       <WeekView
         ref={componentRef}
         events={events}
+        // events={sampleEvents}
         selectedDate={new Date()}
         numberOfDays={7}
         pageStartAt={PAGE_START_AT}
@@ -255,15 +266,11 @@ export default EventCalendar = () => {
         eventContainerStyle={styles.eventContainer}
         gridColumnStyle={styles.gridColumn}
         gridRowStyle={styles.gridRow}
-        // formatDateHeader=""
-        // formatTimeLabel={}
         hoursInDisplay={3}
         timeStep={60}
-        // DayHeaderComponent={CustomeHeaderComponts}
         startHour={15}
         fixedHorizontally={showFixedComponent}
         showTitle={!showFixedComponent}
-        // timesColumnWidth={0.2}
         showNowLine
         onDragEvent={onDragEvent}
         isRefreshing={false}
@@ -281,10 +288,11 @@ export default EventCalendar = () => {
         runOnJS={false}
         //custom added
         customHeaderData={location}
-        horizontalScrollEnabled={false}
+        horizontalScrollEnabled={true}
         customDate={time}
         isCustom={true}
       />
+      {/* <CustomDraggable /> */}
     </View>
   );
 };
